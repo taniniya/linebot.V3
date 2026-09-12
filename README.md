@@ -55,3 +55,8 @@ https://YOURDOMAIN/webhook
 で追加できます。
 
 最初の管理者はADMIN_IDSに入れてください。
+
+#使い方
+
+botを起動した後LINE側で/helpで見られます
+src/index.jsの中からも見られるので各自で確認してください
