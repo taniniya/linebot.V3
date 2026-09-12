@@ -30,7 +30,7 @@ Start command:
 npm start
 
 Webhook:
-https://YOUR-KOYEB-DOMAIN/webhook
+https://YOURDOMAIN/webhook
 
 ## 必要な環境変数
 
