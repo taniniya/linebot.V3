@@ -587,7 +587,7 @@ async function processEvent(event) {
   console.log("LINE EVENT:", JSON.stringify(event));
 
   // Botがグループ・複数人チャットに参加した
-  if (event.type === "join") {
+if (event.type === "join") {
     console.log("✅ Bot joined a group/room");
 
     const sourceType = event.source?.type;
@@ -601,15 +601,9 @@ async function processEvent(event) {
       `Room ID: ${roomId || "-"}`
     );
 
-    if (event.replyToken) {
-      await reply(
-        event.replyToken,
-        "🟢 Botが参加しました！\n/help でコマンド一覧を確認できます。"
-      );
-    }
-
+    // joinイベントでは返信しない
     return;
-  }
+}
 
   // メッセージ以外のイベントはここで終了
   if (event.type !== "message") return;
