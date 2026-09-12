@@ -1,4 +1,5 @@
-# LINE Neon Discord Bot - AI生成してます
+# LINE Neon Discord Bot 
+*AI生成です　使用する場合は自己責任でお願いします
 
 Node.js + LINE Messaging API + Neon PostgreSQL + OpenRouter + Discord Webhook。
 
