@@ -11,28 +11,53 @@ import path from "path";
 import { promises as fs } from "fs";
 
 import {
-  initDb, ensureUser, incrementMessageCount, getUser, isAdmin,
-  addAdmin, getAdmins, addCoins, transferCoins, getMessageRank,
-  getCoinRank, getMessagePosition, claimLoginBonus, hasRobbedToday,
-  robCoins, resetMessageRank, setAiEnabled
+  initDb,
+  ensureUser,
+  incrementMessageCount,
+  getUser,
+  isAdmin,
+  addAdmin,
+  getAdmins,
+  addCoins,
+  transferCoins,
+  getMessageRank,
+  getCoinRank,
+  getMessagePosition,
+  claimLoginBonus,
+  hasRobbedToday,
+  robCoins,
+  resetMessageRank,
+  setAiEnabled
 } from "./db.js";
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
+
+// ========================================
+// ENV
+// ========================================
+
 const PORT = Number(process.env.PORT || 3000);
 
 const LINE_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 const LINE_SECRET = process.env.LINE_CHANNEL_SECRET;
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+
+const DISCORD_WEBHOOK_URL =
+  process.env.DISCORD_WEBHOOK_URL;
+
+const OPENROUTER_API_KEY =
+  process.env.OPENROUTER_API_KEY;
+
 const OPENROUTER_MODEL =
-  process.env.OPENROUTER_MODEL || "openai/gpt-oss-20b";
+  process.env.OPENROUTER_MODEL;
+
 const WEATHER_AREA_CODE =
   process.env.WEATHER_AREA_CODE || "130000";
 
 const TARGET_MB =
   Number(process.env.DISCORD_MAX_UPLOAD_MB || 9.5);
+
 const TARGET_BYTES =
   Math.floor(TARGET_MB * 1024 * 1024);
 
@@ -46,17 +71,25 @@ const VIDEO_MAX_SECONDS =
   Number(process.env.VIDEO_MAX_SECONDS || 0);
 
 if (!LINE_TOKEN || !LINE_SECRET) {
-  console.warn("LINE credentials are missing.");
+  console.warn("⚠️ LINE credentials are missing.");
 }
 
 if (!DISCORD_WEBHOOK_URL) {
-  console.warn("DISCORD_WEBHOOK_URL is missing.");
+  console.warn("⚠️ DISCORD_WEBHOOK_URL is missing.");
+}
+
+if (!OPENROUTER_API_KEY) {
+  console.warn("⚠️ OPENROUTER_API_KEY is missing.");
+}
+
+if (!OPENROUTER_MODEL) {
+  console.warn("⚠️ OPENROUTER_MODEL is missing.");
 }
 
 
-/* =========================================================
-   HTTP
-========================================================= */
+// ========================================
+// HTTP
+// ========================================
 
 app.get("/", (_req, res) => {
   res.json({
@@ -66,12 +99,14 @@ app.get("/", (_req, res) => {
 });
 
 
-/* =========================================================
-   LINE Signature
-========================================================= */
+// ========================================
+// LINE Signature
+// ========================================
 
 function verifySignature(rawBody, signature) {
-  if (!signature || !LINE_SECRET) return false;
+  if (!signature || !LINE_SECRET) {
+    return false;
+  }
 
   const digest = crypto
     .createHmac("SHA256", LINE_SECRET)
@@ -88,9 +123,9 @@ function verifySignature(rawBody, signature) {
 }
 
 
-/* =========================================================
-   Webhook
-========================================================= */
+// ========================================
+// LINE Webhook
+// ========================================
 
 app.post(
   "/webhook",
@@ -115,7 +150,7 @@ app.post(
         req.body.toString("utf8")
       );
 
-      // LINEには即座に200を返す
+      // LINEには即レス
       res.status(200).send("OK");
 
       for (const event of body.events || []) {
@@ -134,24 +169,27 @@ app.post(
       );
 
       if (!res.headersSent) {
-        res.status(400).send("Bad Request");
+        res
+          .status(400)
+          .send("Bad Request");
       }
     }
   }
 );
 
 
-/* =========================================================
-   LINE User
-========================================================= */
+// ========================================
+// LINE User
+// ========================================
 
 function sourceUserId(event) {
   return event?.source?.userId || null;
 }
 
+
 async function getDisplayName(lineId) {
   try {
-    const r = await axios.get(
+    const response = await axios.get(
       `https://api.line.me/v2/bot/profile/${encodeURIComponent(lineId)}`,
       {
         headers: {
@@ -161,7 +199,10 @@ async function getDisplayName(lineId) {
       }
     );
 
-    return r.data.displayName || "Unknown";
+    return (
+      response.data?.displayName ||
+      "Unknown"
+    );
 
   } catch {
     return "Unknown";
@@ -169,11 +210,14 @@ async function getDisplayName(lineId) {
 }
 
 
-/* =========================================================
-   LINE Reply
-========================================================= */
+// ========================================
+// LINE Reply
+// ========================================
 
-async function reply(replyToken, text) {
+async function reply(
+  replyToken,
+  text
+) {
   if (!replyToken) return;
 
   await axios.post(
@@ -189,8 +233,10 @@ async function reply(replyToken, text) {
     },
     {
       headers: {
-        Authorization: `Bearer ${LINE_TOKEN}`,
-        "Content-Type": "application/json"
+        Authorization:
+          `Bearer ${LINE_TOKEN}`,
+        "Content-Type":
+          "application/json"
       },
       timeout: 30000
     }
@@ -198,28 +244,31 @@ async function reply(replyToken, text) {
 }
 
 
-/* =========================================================
-   LINE Content
-========================================================= */
+// ========================================
+// LINE Media
+// ========================================
 
 async function lineGetContent(messageId) {
-  const r = await axios.get(
+  const response = await axios.get(
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
     {
       headers: {
-        Authorization: `Bearer ${LINE_TOKEN}`
+        Authorization:
+          `Bearer ${LINE_TOKEN}`
       },
       responseType: "arraybuffer",
       timeout: 180000,
-      maxContentLength: 300 * 1024 * 1024,
-      maxBodyLength: 300 * 1024 * 1024
+      maxContentLength:
+        300 * 1024 * 1024,
+      maxBodyLength:
+        300 * 1024 * 1024
     }
   );
 
   return {
-    data: Buffer.from(r.data),
+    data: Buffer.from(response.data),
     contentType:
-      r.headers["content-type"] ||
+      response.headers["content-type"] ||
       "application/octet-stream"
   };
 }
@@ -227,22 +276,24 @@ async function lineGetContent(messageId) {
 
 async function lineGetPreview(messageId) {
   try {
-    const r = await axios.get(
+    const response = await axios.get(
       `https://api-data.line.me/v2/bot/message/${messageId}/content/preview`,
       {
         headers: {
-          Authorization: `Bearer ${LINE_TOKEN}`
+          Authorization:
+            `Bearer ${LINE_TOKEN}`
         },
         responseType: "arraybuffer",
         timeout: 60000,
-        maxContentLength: 20 * 1024 * 1024
+        maxContentLength:
+          20 * 1024 * 1024
       }
     );
 
     return {
-      data: Buffer.from(r.data),
+      data: Buffer.from(response.data),
       contentType:
-        r.headers["content-type"] ||
+        response.headers["content-type"] ||
         "image/jpeg"
     };
 
@@ -252,12 +303,14 @@ async function lineGetPreview(messageId) {
 }
 
 
-/* =========================================================
-   Discord
-========================================================= */
+// ========================================
+// Discord
+// ========================================
 
 async function sendDiscordText(content) {
-  if (!DISCORD_WEBHOOK_URL) return;
+  if (!DISCORD_WEBHOOK_URL) {
+    return;
+  }
 
   await axios.post(
     DISCORD_WEBHOOK_URL,
@@ -280,7 +333,9 @@ async function sendDiscordFile(
   content,
   contentType
 ) {
-  if (!DISCORD_WEBHOOK_URL) return false;
+  if (!DISCORD_WEBHOOK_URL) {
+    return false;
+  }
 
   if (buffer.length > TARGET_BYTES) {
     return false;
@@ -291,7 +346,8 @@ async function sendDiscordFile(
   form.append(
     "payload_json",
     JSON.stringify({
-      content: String(content).slice(0, 1900),
+      content:
+        String(content).slice(0, 1900),
       allowed_mentions: {
         parse: []
       }
@@ -311,10 +367,13 @@ async function sendDiscordFile(
     DISCORD_WEBHOOK_URL,
     form,
     {
-      headers: form.getHeaders(),
+      headers:
+        form.getHeaders(),
       timeout: 180000,
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
+      maxContentLength:
+        Infinity,
+      maxBodyLength:
+        Infinity
     }
   );
 
@@ -322,9 +381,9 @@ async function sendDiscordFile(
 }
 
 
-/* =========================================================
-   File Size
-========================================================= */
+// ========================================
+// Utils
+// ========================================
 
 function formatBytes(bytes) {
   if (bytes < 1024) {
@@ -332,23 +391,30 @@ function formatBytes(bytes) {
   }
 
   if (bytes < 1024 ** 2) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(
+      bytes / 1024
+    ).toFixed(1)} KB`;
   }
 
   if (bytes < 1024 ** 3) {
-    return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    return `${(
+      bytes / 1024 ** 2
+    ).toFixed(1)} MB`;
   }
 
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  return `${(
+    bytes / 1024 ** 3
+  ).toFixed(1)} GB`;
 }
 
 
-/* =========================================================
-   Extension
-========================================================= */
-
-function extForType(contentType, type) {
-  const ct = (contentType || "").toLowerCase();
+function extForType(
+  contentType,
+  type
+) {
+  const ct =
+    (contentType || "")
+      .toLowerCase();
 
   if (ct.includes("jpeg")) return ".jpg";
   if (ct.includes("png")) return ".png";
@@ -367,17 +433,23 @@ function extForType(contentType, type) {
 }
 
 
-/* =========================================================
-   Image Compression
-========================================================= */
+// ========================================
+// Image Compression
+// ========================================
 
 async function compressImage(
   input,
   outputDir
 ) {
   const qualities = [
-    85, 75, 65, 55,
-    45, 35, 28, 22
+    85,
+    75,
+    65,
+    55,
+    45,
+    35,
+    28,
+    22
   ];
 
   const scales = [
@@ -424,7 +496,9 @@ async function compressImage(
 
       last = output;
 
-      if (stat.size <= TARGET_BYTES) {
+      if (
+        stat.size <= TARGET_BYTES
+      ) {
         return {
           path: output,
           contentType: "image/jpeg"
@@ -445,9 +519,9 @@ async function compressImage(
 }
 
 
-/* =========================================================
-   FFmpeg
-========================================================= */
+// ========================================
+// Video Compression
+// ========================================
 
 function runFfmpeg(
   input,
@@ -465,20 +539,24 @@ function runFfmpeg(
           "-preset veryfast",
           "-movflags +faststart",
           "-pix_fmt yuv420p",
-          "-maxrate " + videoBitrate,
+          "-maxrate " +
+            videoBitrate,
           "-bufsize " +
             (parseInt(
               videoBitrate,
               10
             ) * 2) +
             "k",
-          "-b:a " + audioBitrate
+          "-b:a " +
+            audioBitrate
         ])
         .videoFilters(
           `scale='min(${width},iw)':-2`
         );
 
-      if (VIDEO_MAX_SECONDS > 0) {
+      if (
+        VIDEO_MAX_SECONDS > 0
+      ) {
         command =
           command.duration(
             VIDEO_MAX_SECONDS
@@ -494,16 +572,16 @@ function runFfmpeg(
 }
 
 
-/* =========================================================
-   Video Compression
-========================================================= */
-
 async function compressVideo(
   input,
   outputDir
 ) {
   const profiles = [
-    ["1800k", "128k", VIDEO_MAX_DIMENSION],
+    [
+      "1800k",
+      "128k",
+      VIDEO_MAX_DIMENSION
+    ],
     ["1400k", "112k", 1280],
     ["1000k", "96k", 960],
     ["750k", "80k", 854],
@@ -516,20 +594,20 @@ async function compressVideo(
   let last = null;
 
   for (
-    const [vb, ab, width]
+    const [videoBitrate, audioBitrate, width]
     of profiles
   ) {
     const output = path.join(
       outputDir,
-      `video-${Date.now()}-${vb}.mp4`
+      `video-${Date.now()}-${videoBitrate}.mp4`
     );
 
     try {
       await runFfmpeg(
         input,
         output,
-        vb,
-        ab,
+        videoBitrate,
+        audioBitrate,
         width
       );
 
@@ -564,9 +642,9 @@ async function compressVideo(
 }
 
 
-/* =========================================================
-   Discord Text Log
-========================================================= */
+// ========================================
+// Discord LINE Text Log
+// ========================================
 
 async function logTextToDiscord(
   name,
@@ -591,9 +669,9 @@ async function logTextToDiscord(
 }
 
 
-/* =========================================================
-   Discord Media Log
-========================================================= */
+// ========================================
+// Discord Media Log
+// ========================================
 
 async function logMediaToDiscord(
   name,
@@ -642,11 +720,9 @@ async function logMediaToDiscord(
       `ユーザー: ${name}\n` +
       `LINE ID: \`${lineId || "unknown"}\`\n` +
       `種類: ${type}\n` +
-      `元サイズ: ${formatBytes(
-        original.data.length
-      )}`;
+      `元サイズ: ${formatBytes(original.data.length)}`;
 
-    // 元ファイルがDiscordサイズ以内ならそのまま送信
+    // そのまま送れる場合
     if (
       original.data.length <=
       TARGET_BYTES
@@ -699,6 +775,7 @@ async function logMediaToDiscord(
         );
     }
 
+    // 圧縮後送信
     if (compressed) {
       const data =
         await fs.readFile(
@@ -706,7 +783,8 @@ async function logMediaToDiscord(
         );
 
       if (
-        data.length <= TARGET_BYTES
+        data.length <=
+        TARGET_BYTES
       ) {
         await sendDiscordFile(
           data,
@@ -715,9 +793,7 @@ async function logMediaToDiscord(
             : `line-${messageId}-compressed.mp4`,
           `${description}\n` +
             `🗜️ 自動圧縮済み\n` +
-            `圧縮後: ${formatBytes(
-              data.length
-            )}`,
+            `圧縮後: ${formatBytes(data.length)}`,
           compressed.contentType
         );
 
@@ -755,23 +831,18 @@ async function logMediaToDiscord(
 }
 
 
-/* =========================================================
-   Mention
-========================================================= */
+// ========================================
+// Command Utils
+// ========================================
 
 function extractMentionId(event) {
   return (
     event?.message?.mention?.mentionees
-      || []
-  ).find(
-    m => m.userId
-  )?.userId || null;
+      ?.find(m => m.userId)
+      ?.userId || null
+  );
 }
 
-
-/* =========================================================
-   Command Parser
-========================================================= */
 
 function argsAfterCommand(text) {
   const parts =
@@ -780,14 +851,11 @@ function argsAfterCommand(text) {
   return {
     command:
       parts[0].toLowerCase(),
-    args: parts.slice(1)
+    args:
+      parts.slice(1)
   };
 }
 
-
-/* =========================================================
-   Amount
-========================================================= */
 
 function parseAmount(
   value,
@@ -796,7 +864,8 @@ function parseAmount(
   if (!value) return null;
 
   if (
-    value.toLowerCase() === "all"
+    value.toLowerCase() ===
+    "all"
   ) {
     return currentCoins;
   }
@@ -814,10 +883,6 @@ function parseAmount(
 }
 
 
-/* =========================================================
-   Ranking
-========================================================= */
-
 function formatRank(
   rows,
   field
@@ -826,8 +891,8 @@ function formatRank(
     return "まだデータがありません。";
   }
 
-  return rows.map(
-    (r, i) => {
+  return rows
+    .map((r, i) => {
       const value =
         field === "coin"
           ? Number(r.coins)
@@ -842,14 +907,14 @@ function formatRank(
             : "回"
         }`
       );
-    }
-  ).join("\n");
+    })
+    .join("\n");
 }
 
 
-/* =========================================================
-   OpenRouter
-========================================================= */
+// ========================================
+// OpenRouter
+// ========================================
 
 async function openRouterChat(
   content
@@ -858,16 +923,22 @@ async function openRouterChat(
     return "OpenRouter APIキーが設定されていません。";
   }
 
+  if (!OPENROUTER_MODEL) {
+    return "OpenRouterモデルが設定されていません。";
+  }
+
   const response =
     await axios.post(
       "https://openrouter.ai/api/v1/chat/completions",
       {
         model: OPENROUTER_MODEL,
+
         messages: [
           {
             role: "system",
             content:
-              "あなたはLINE BotのAIアシスタントです。日本語で自然に回答してください。"
+              "あなたはLINE BotのAIアシスタントです。" +
+              "日本語で自然に回答してください。"
           },
           {
             role: "user",
@@ -879,15 +950,19 @@ async function openRouterChat(
         headers: {
           Authorization:
             `Bearer ${OPENROUTER_API_KEY}`,
+
           "Content-Type":
             "application/json",
+
           "HTTP-Referer":
             process.env.OPENROUTER_SITE_URL ||
             "https://example.com",
+
           "X-Title":
             process.env.OPENROUTER_APP_NAME ||
             "LINE Bot"
         },
+
         timeout: 120000
       }
     );
@@ -901,9 +976,9 @@ async function openRouterChat(
 }
 
 
-/* =========================================================
-   Weather
-========================================================= */
+// ========================================
+// Weather
+// ========================================
 
 async function weather() {
   const response =
@@ -916,7 +991,8 @@ async function weather() {
       }
     );
 
-  const data = response.data;
+  const data =
+    response.data;
 
   const office =
     data?.[0]?.publishingOffice ||
@@ -963,24 +1039,24 @@ async function weather() {
 }
 
 
-/* =========================================================
-   Omikuzi
-========================================================= */
+// ========================================
+// Omikuzi
+// ========================================
 
 const omikuzi = [
-  ["大吉", "最高の運勢です！"],
-  ["中吉", "かなり良い運勢です！"],
-  ["小吉", "小さな幸運がありそうです。"],
-  ["吉", "普通に良い一日になりそうです。"],
-  ["末吉", "これから運気が上がりそうです。"],
-  ["凶", "今日は少し慎重に。"],
-  ["大凶", "今日は無理をしないほうがよさそうです。"]
+  ["大吉"],
+  ["中吉"],
+  ["小吉"],
+  ["吉"],
+  ["末吉"],
+  ["凶"],
+  ["大凶"]
 ];
+
 
 function drawOmikuzi() {
   const [
-    result,
-    message
+    result
   ] =
     omikuzi[
       Math.floor(
@@ -991,35 +1067,36 @@ function drawOmikuzi() {
 
   return (
     `🥠 おみくじ\n` +
-    `結果：${result}\n` +
-    `${message}`
+    `結果：${result}`
   );
 }
 
 
-/* =========================================================
-   Help
-========================================================= */
+// ========================================
+// Help
+// ========================================
 
 function helpText() {
   return [
     "📖 コマンド一覧",
     "",
+
     "/ai <内容> - AIと会話",
     "/mycoin - コイン数",
     "/rank - 発言回数ランキング",
     "/rank coin - コインランキング",
     "/rankcoin - コインランキング",
     "/myrank - 自分の発言順位",
-    "/login - 1日1回ログインボーナス",
+    "/login - ログインボーナス",
     "/tenki - 天気",
     "/omikuzi - おみくじ",
     "/rob @ユーザー - 1日1回の強盗",
     "/coints <表|裏> <金額|all> - コイントス",
     "/slot <金額|all> - スロット",
     "/pay <金額> @メンション - 送金",
-    "/uid @メンション - LINE User ID取得",
+
     "",
+
     "管理者:",
     "/give coin <数> @メンション",
     "/admins",
@@ -1031,9 +1108,9 @@ function helpText() {
 }
 
 
-/* =========================================================
-   Text Commands
-========================================================= */
+// ========================================
+// Text Commands
+// ========================================
 
 async function handleText(
   event,
@@ -1053,9 +1130,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     HELP
-  ------------------------- */
+  // ======================================
+  // Help
+  // ======================================
 
   if (
     command === "/help" ||
@@ -1070,9 +1147,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     AI
-  ------------------------- */
+  // ======================================
+  // AI
+  // ======================================
 
   if (command === "/ai") {
     const user =
@@ -1100,9 +1177,14 @@ async function handleText(
     }
 
     try {
+      const answer =
+        await openRouterChat(
+          prompt
+        );
+
       await reply(
         event.replyToken,
-        await openRouterChat(prompt)
+        answer
       );
 
     } catch (e) {
@@ -1121,9 +1203,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     MYCOIN
-  ------------------------- */
+  // ======================================
+  // My Coin
+  // ======================================
 
   if (command === "/mycoin") {
     const u =
@@ -1138,9 +1220,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     RANK
-  ------------------------- */
+  // ======================================
+  // Rank
+  // ======================================
 
   if (command === "/rank") {
     const coin =
@@ -1155,28 +1237,19 @@ async function handleText(
     await reply(
       event.replyToken,
       coin
-        ? `💰 コインランキング\n${formatRank(
-            rows,
-            "coin"
-          )}`
-        : `💬 発言回数ランキング\n${formatRank(
-            rows,
-            "message"
-          )}`
+        ? `💰 コインランキング\n${formatRank(rows, "coin")}`
+        : `💬 発言回数ランキング\n${formatRank(rows, "message")}`
     );
 
     return;
   }
 
 
-  /* -------------------------
-     RANK COIN
-  ------------------------- */
-
   if (command === "/rankcoin") {
     await reply(
       event.replyToken,
-      `💰 コインランキング\n${formatRank(
+      `💰 コインランキング\n` +
+      `${formatRank(
         await getCoinRank(10),
         "coin"
       )}`
@@ -1186,9 +1259,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     MY RANK
-  ------------------------- */
+  // ======================================
+  // My Rank
+  // ======================================
 
   if (command === "/myrank") {
     const rank =
@@ -1212,42 +1285,30 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     LOGIN
-     1日1回制限はDB側で管理
-  ------------------------- */
+  // ======================================
+  // Login
+  // ======================================
 
   if (command === "/login") {
-    try {
-      const r =
-        await claimLoginBonus(lineId);
-
-      if (r.already) {
-        await reply(
-          event.replyToken,
-          `✅ 今日はすでに受け取り済みです。\n` +
-          `連続ログイン：${r.streak}日\n` +
-          `所持コイン：${r.coins.toLocaleString()}`
-        );
-      } else {
-        await reply(
-          event.replyToken,
-          `🎁 ログインボーナス！\n` +
-          `+${r.reward} coin\n` +
-          `連続ログイン：${r.streak}日\n` +
-          `所持コイン：${r.coins.toLocaleString()}`
-        );
-      }
-
-    } catch (e) {
-      console.error(
-        "login error:",
-        e
+    const r =
+      await claimLoginBonus(
+        lineId
       );
 
+    if (r.already) {
       await reply(
         event.replyToken,
-        "⚠️ ログインボーナス処理に失敗しました。"
+        `✅ 今日はすでに受け取り済みです。\n` +
+        `連続ログイン：${r.streak}日\n` +
+        `所持コイン：${r.coins.toLocaleString()}`
+      );
+    } else {
+      await reply(
+        event.replyToken,
+        `🎁 ログインボーナス！\n` +
+        `+${r.reward} coin\n` +
+        `連続ログイン：${r.streak}日\n` +
+        `所持コイン：${r.coins.toLocaleString()}`
       );
     }
 
@@ -1255,9 +1316,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     WEATHER
-  ------------------------- */
+  // ======================================
+  // Weather
+  // ======================================
 
   if (command === "/tenki") {
     try {
@@ -1265,7 +1326,6 @@ async function handleText(
         event.replyToken,
         await weather()
       );
-
     } catch {
       await reply(
         event.replyToken,
@@ -1277,9 +1337,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     OMIKUZI
-  ------------------------- */
+  // ======================================
+  // Omikuzi
+  // ======================================
 
   if (command === "/omikuzi") {
     await reply(
@@ -1291,9 +1351,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     ROB
-  ------------------------- */
+  // ======================================
+  // Rob
+  // ======================================
 
   if (command === "/rob") {
     const targetId =
@@ -1309,7 +1369,9 @@ async function handleText(
     }
 
     if (
-      await hasRobbedToday(lineId)
+      await hasRobbedToday(
+        lineId
+      )
     ) {
       await reply(
         event.replyToken,
@@ -1358,13 +1420,12 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     COINTS
-  ------------------------- */
+  // ======================================
+  // Coin Toss
+  // ======================================
 
   if (command === "/coints") {
-    const side =
-      args[0];
+    const side = args[0];
 
     const u =
       await getUser(lineId);
@@ -1396,7 +1457,8 @@ async function handleText(
     }
 
     if (
-      amount > Number(u.coins)
+      amount >
+      Number(u.coins)
     ) {
       await reply(
         event.replyToken,
@@ -1423,7 +1485,6 @@ async function handleText(
         `🎉 的中！\n` +
         `+${amount.toLocaleString()} coin`
       );
-
     } else {
       await addCoins(
         lineId,
@@ -1442,9 +1503,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     SLOT
-  ------------------------- */
+  // ======================================
+  // Slot
+  // ======================================
 
   if (command === "/slot") {
     const u =
@@ -1466,7 +1527,8 @@ async function handleText(
     }
 
     if (
-      amount > Number(u.coins)
+      amount >
+      Number(u.coins)
     ) {
       await reply(
         event.replyToken,
@@ -1493,7 +1555,6 @@ async function handleText(
         `🎉 JACKPOT！\n` +
         `賭け金 ${amount.toLocaleString()} coin に対して5倍！`
       );
-
     } else {
       await addCoins(
         lineId,
@@ -1511,9 +1572,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     PAY
-  ------------------------- */
+  // ======================================
+  // Pay
+  // ======================================
 
   if (command === "/pay") {
     const targetId =
@@ -1538,9 +1599,7 @@ async function handleText(
     try {
       await ensureUser(
         targetId,
-        await getDisplayName(
-          targetId
-        )
+        await getDisplayName(targetId)
       );
 
       await transferCoins(
@@ -1568,68 +1627,11 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     GIVE
-  ------------------------- */
-
-  if (command === "/give") {
-    if (
-      !(await isAdmin(lineId))
-    ) {
-      await reply(
-        event.replyToken,
-        "🚫 管理者専用です。"
-      );
-
-      return;
-    }
-
-    const targetId =
-      extractMentionId(event);
-
-    const amount =
-      Number(args[1]);
-
-    if (
-      args[0]?.toLowerCase() !==
-        "coin" ||
-      !targetId ||
-      !Number.isInteger(amount) ||
-      amount <= 0
-    ) {
-      await reply(
-        event.replyToken,
-        "使い方：/give coin <数> @メンション"
-      );
-
-      return;
-    }
-
-    await ensureUser(
-      targetId,
-      await getDisplayName(
-        targetId
-      )
-    );
-
-    await addCoins(
-      targetId,
-      amount
-    );
-
-    await reply(
-      event.replyToken,
-      `👑 ${amount.toLocaleString()} coinを付与しました。`
-    );
-
-    return;
-  }
-
-
-  /* -------------------------
-     UID
-     ★ 管理者限定を解除
-  ------------------------- */
+  // ======================================
+  // UID
+  // 全員使用可能
+  // helpには表示しない
+  // ======================================
 
   if (command === "/uid") {
     const targetId =
@@ -1651,17 +1653,71 @@ async function handleText(
     await sendDiscordText(
       `🆔 **LINE UID取得**\n` +
       `ユーザー: ${targetName}\n` +
-      `LINE User ID: \`${targetId}\`\n` +
-      `実行者: \`${lineId}\``
+      `LINE User ID: \`${targetId}\``
     );
 
     return;
   }
 
 
-  /* -------------------------
-     ADMINS
-  ------------------------- */
+  // ======================================
+  // ADMIN: give
+  // ======================================
+
+  if (command === "/give") {
+    if (
+      !(await isAdmin(lineId))
+    ) {
+      await reply(
+        event.replyToken,
+        "🚫 管理者専用です。"
+      );
+
+      return;
+    }
+
+    const targetId =
+      extractMentionId(event);
+
+    const amount =
+      Number(args[1]);
+
+    if (
+      args[0]?.toLowerCase() !== "coin" ||
+      !targetId ||
+      !Number.isInteger(amount) ||
+      amount <= 0
+    ) {
+      await reply(
+        event.replyToken,
+        "使い方：/give coin <数> @メンション"
+      );
+
+      return;
+    }
+
+    await ensureUser(
+      targetId,
+      await getDisplayName(targetId)
+    );
+
+    await addCoins(
+      targetId,
+      amount
+    );
+
+    await reply(
+      event.replyToken,
+      `👑 ${amount.toLocaleString()} coinを付与しました。`
+    );
+
+    return;
+  }
+
+
+  // ======================================
+  // ADMIN: admins
+  // ======================================
 
   if (command === "/admins") {
     if (
@@ -1675,25 +1731,27 @@ async function handleText(
       return;
     }
 
-    const a =
+    const admins =
       await getAdmins();
 
     await reply(
       event.replyToken,
       `👑 管理者一覧\n` +
-      `${a.map(
-        (x, i) =>
-          `${i + 1}. ${x.line_id}`
-      ).join("\n")}`
+      admins
+        .map(
+          (x, i) =>
+            `${i + 1}. ${x.line_id}`
+        )
+        .join("\n")
     );
 
     return;
   }
 
 
-  /* -------------------------
-     RESET RANK
-  ------------------------- */
+  // ======================================
+  // ADMIN: reset rank
+  // ======================================
 
   if (command === "/resetrank") {
     if (
@@ -1718,9 +1776,9 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     OFFBOT / ONBOT
-  ------------------------- */
+  // ======================================
+  // ADMIN: AI ON/OFF
+  // ======================================
 
   if (
     command === "/offbot" ||
@@ -1751,9 +1809,7 @@ async function handleText(
 
     await ensureUser(
       targetId,
-      await getDisplayName(
-        targetId
-      )
+      await getDisplayName(targetId)
     );
 
     await setAiEnabled(
@@ -1772,11 +1828,13 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     ADMIN PLUS USER
-  ------------------------- */
+  // ======================================
+  // ADMIN: add admin
+  // ======================================
 
-  if (command === "/adminplususer") {
+  if (
+    command === "/adminplususer"
+  ) {
     if (
       !(await isAdmin(lineId))
     ) {
@@ -1824,20 +1882,21 @@ async function handleText(
   }
 
 
-  /* -------------------------
-     UNKNOWN
-  ------------------------- */
+  // ======================================
+  // Unknown
+  // ======================================
 
   await reply(
     event.replyToken,
-    "❓ 不明なコマンドです。\n/help で一覧を確認できます。"
+    "❓ 不明なコマンドです。\n" +
+    "/help で一覧を確認できます。"
   );
 }
 
 
-/* =========================================================
-   Process LINE Event
-========================================================= */
+// ========================================
+// Event Processor
+// ========================================
 
 async function processEvent(event) {
   console.log(
@@ -1846,10 +1905,9 @@ async function processEvent(event) {
   );
 
 
-  /* -------------------------
-     JOIN
-     返信しない
-  ------------------------- */
+  // ======================================
+  // Bot Join
+  // ======================================
 
   if (event.type === "join") {
     console.log(
@@ -1865,27 +1923,21 @@ async function processEvent(event) {
     const roomId =
       event.source?.roomId;
 
-    try {
-      await sendDiscordText(
-        `🟢 **LINE Bot参加**\n` +
-        `種類: ${sourceType || "unknown"}\n` +
-        `Group ID: ${groupId || "-"}\n` +
-        `Room ID: ${roomId || "-"}`
-      );
-    } catch (e) {
-      console.error(
-        "join Discord log error:",
-        e
-      );
-    }
+    await sendDiscordText(
+      `🟢 **LINE Bot参加**\n` +
+      `種類: ${sourceType || "unknown"}\n` +
+      `Group ID: ${groupId || "-"}\n` +
+      `Room ID: ${roomId || "-"}`
+    );
 
+    // Joinイベントでは返信しない
     return;
   }
 
 
-  /* -------------------------
-     LEAVE
-  ------------------------- */
+  // ======================================
+  // Leave
+  // ======================================
 
   if (event.type === "leave") {
     console.log(
@@ -1901,34 +1953,26 @@ async function processEvent(event) {
     const roomId =
       event.source?.roomId;
 
-    try {
-      await sendDiscordText(
-        `🔴 **LINE Bot退出**\n` +
-        `種類: ${sourceType || "unknown"}\n` +
-        `Group ID: ${groupId || "-"}\n` +
-        `Room ID: ${roomId || "-"}`
-      );
-    } catch (e) {
-      console.error(
-        "leave Discord log error:",
-        e
-      );
-    }
+    await sendDiscordText(
+      `🔴 **LINE Bot退出**\n` +
+      `種類: ${sourceType || "unknown"}\n` +
+      `Group ID: ${groupId || "-"}\n` +
+      `Room ID: ${roomId || "-"}`
+    );
 
     return;
   }
 
 
-  /* -------------------------
-     その他
-  ------------------------- */
+  // ======================================
+  // Message only
+  // ======================================
 
   if (
     event.type !== "message"
   ) {
     return;
   }
-
 
   const lineId =
     sourceUserId(event);
@@ -1937,6 +1981,10 @@ async function processEvent(event) {
     return;
   }
 
+
+  // ======================================
+  // User
+  // ======================================
 
   const name =
     await getDisplayName(
@@ -1949,12 +1997,13 @@ async function processEvent(event) {
   );
 
 
-  /* -------------------------
-     TEXT
-  ------------------------- */
+  // ======================================
+  // Text
+  // ======================================
 
   if (
-    event.message.type === "text"
+    event.message.type ===
+    "text"
   ) {
     await logTextToDiscord(
       name,
@@ -1972,9 +2021,9 @@ async function processEvent(event) {
   }
 
 
-  /* -------------------------
-     MEDIA
-  ------------------------- */
+  // ======================================
+  // Media
+  // ======================================
 
   if (
     [
@@ -1996,6 +2045,10 @@ async function processEvent(event) {
   }
 
 
+  // ======================================
+  // Other
+  // ======================================
+
   await sendDiscordText(
     `**LINE会話ログ**\n` +
     `ユーザー: ${name}\n` +
@@ -2005,9 +2058,9 @@ async function processEvent(event) {
 }
 
 
-/* =========================================================
-   Start
-========================================================= */
+// ========================================
+// Start
+// ========================================
 
 await initDb();
 
@@ -2020,6 +2073,12 @@ app.listen(
 
     console.log(
       `Webhook: /webhook`
+    );
+
+    console.log(
+      `OpenRouter model: ${
+        OPENROUTER_MODEL || "(未設定)"
+      }`
     );
   }
 );
