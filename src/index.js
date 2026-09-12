@@ -584,6 +584,34 @@ async function handleText(event, lineId) {
 }
 
 async function processEvent(event) {
+  console.log("LINE EVENT:", JSON.stringify(event));
+
+  // Botがグループ・複数人チャットに参加した
+  if (event.type === "join") {
+    console.log("✅ Bot joined a group/room");
+
+    const sourceType = event.source?.type;
+    const groupId = event.source?.groupId;
+    const roomId = event.source?.roomId;
+
+    await sendDiscordText(
+      `🟢 **LINE Bot参加**\n` +
+      `種類: ${sourceType || "unknown"}\n` +
+      `Group ID: ${groupId || "-"}\n` +
+      `Room ID: ${roomId || "-"}`
+    );
+
+    if (event.replyToken) {
+      await reply(
+        event.replyToken,
+        "🟢 Botが参加しました！\n/help でコマンド一覧を確認できます。"
+      );
+    }
+
+    return;
+  }
+
+  // メッセージ以外のイベントはここで終了
   if (event.type !== "message") return;
   const lineId = sourceUserId(event);
   if (!lineId) return;
