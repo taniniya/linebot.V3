@@ -1103,8 +1103,7 @@ function helpText() {
     "/admins",
     "/resetrank",
     "/offbot @メンション",
-    "/onbot @メンション",
-    "/adminplususer <LINE USER ID>"
+    "/onbot @メンション"
   ].join("\n");
 }
 
